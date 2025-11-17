@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"encoding/base64"
 
 	"github.com/kevinburke/ssh_config"
 	"golang.org/x/crypto/ssh"
@@ -78,28 +79,38 @@ func (u *ConnectionURI) parseAuthMethods(target string, sshcfg *ssh_config.Confi
 			agentClient := agent.NewClient(conn)
 			result = append(result, ssh.PublicKeysCallback(agentClient.Signers))
 		case "privkey":
-			for _, keypath := range sshKeyPaths {
-				log.Printf("[DEBUG] Reading ssh key '%s'", keypath)
-				path := os.ExpandEnv(keypath)
-				if strings.HasPrefix(path, "~/") {
-					home, err := os.UserHomeDir()
-					if err == nil {
-						path = filepath.Join(home, path[2:])
-					}
-				}
-				sshKey, err := os.ReadFile(path)
-				if err != nil {
-					log.Printf("[ERROR] Failed to read ssh key '%s': %v", keypath, err)
-					continue
-				}
+			for _, keyInput := range sshKeyPaths {
+        var sshKey []byte
+        var err error
 
-				signer, err := ssh.ParsePrivateKey(sshKey)
-				if err != nil {
-					log.Printf("[ERROR] Failed to parse ssh key %s: %v", keypath, err)
-					continue
-				}
-				result = append(result, ssh.PublicKeys(signer))
-			}
+        if strings.HasPrefix(keyInput, "data:") {
+            log.Printf("[DEBUG] Reading inline ssh key")
+            sshKey, err = base64.StdEncoding.DecodeString(strings.TrimPrefix(keyInput, "data:"))
+        } else {
+            log.Printf("[DEBUG] Reading ssh key file '%s'", keyInput)
+            path := os.ExpandEnv(keyInput)
+            if strings.HasPrefix(path, "~/") {
+                home, homeErr := os.UserHomeDir()
+                if homeErr != nil {
+                    continue 
+                }
+                path = filepath.Join(home, path[2:])
+            }
+            sshKey, err = os.ReadFile(path)
+        }
+
+        if err != nil {
+            log.Printf("[ERROR] Failed to load ssh key '%s': %v", keyInput, err)
+            continue
+        }
+
+        signer, err := ssh.ParsePrivateKey(sshKey)
+        if err != nil {
+            log.Printf("[ERROR] Failed to parse ssh key '%s': %v", keyInput, err)
+            continue
+        }
+        result = append(result, ssh.PublicKeys(signer))
+    	}
 		case "ssh-password":
 			if sshPassword, ok := u.User.Password(); ok {
 				result = append(result, ssh.Password(sshPassword))
