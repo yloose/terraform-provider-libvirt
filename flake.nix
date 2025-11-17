@@ -6,7 +6,7 @@
     pkgs = nixpkgs.legacyPackages.${system};
   in {
     devShells.${system}.default = pkgs.mkShell {
-      packages = [ pkgs.go ];
+      packages = [ pkgs.go pkgs.gnumake ];
     };
   };
 }
